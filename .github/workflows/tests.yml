@@ -1,0 +1,98 @@
+name: "tests"
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - '**.yml'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - '**.yml'
+jobs:
+  tests:
+    name: PHP ${{ matrix.php }} - ${{ matrix.stability }}
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:16
+        env:
+          POSTGRES_DB: unleash
+          POSTGRES_USER: unleash
+          POSTGRES_PASSWORD: unleash
+        options: >-
+          --health-cmd "pg_isready -U unleash"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      unleash:
+        image: unleashorg/unleash-server:latest
+        ports:
+          - 4242:4242
+        env:
+          DATABASE_URL: postgres://unleash:unleash@db/unleash
+          DATABASE_SSL: "false"
+          INIT_BACKEND_API_TOKENS: default:development.test-api-token
+          INIT_ADMIN_API_TOKENS: "*:*.test-admin-token"
+        options: >-
+          --health-cmd "wget -qO- http://localhost:4242/health || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+          --health-start-period 60s
+    env:
+      CC_TOKEN: ${{ secrets.CODECLIMATE_TOKEN }}
+    strategy:
+      fail-fast: true
+      matrix:
+        php: [ '8.3', '8.5' ]
+        stability: [ prefer-lowest, prefer-stable ]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          tools: composer:v2
+          coverage: pcov
+
+      - name: Setup Problem Matchers
+        run: echo "::add-matcher::${{ runner.tool_cache }}/phpunit.json"
+
+      - name: Get composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+        if: ${{ !env.ACT }}
+
+      - name: Cache composer dependencies
+        uses: actions/cache@v3
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ matrix.stability }}-${{ matrix.php }} }}
+          restore-keys: ${{ runner.os }}-composer-${{ matrix.stability }}-${{ matrix.php }}
+        if: ${{ !env.ACT }}
+
+      - name: Install PHP Dependencies
+        uses: nick-invision/retry@v2
+        with:
+          timeout_minutes: 5
+          max_attempts: 5
+          command: composer update --${{ matrix.stability }} --prefer-dist --no-interaction --no-progress --quiet
+
+      - name: Execute Tests
+        run: vendor/bin/pest --coverage-clover=coverage.xml
+
+      - name: Upload coverage to codeclimate
+        uses: paambaati/codeclimate-action@v3.1.1
+        continue-on-error: true
+        env:
+          CC_TEST_REPORTER_ID: ${{ env.CC_TOKEN }}
+        with:
+          coverageCommand: ''
+          coverageLocations: ./coverage.xml:clover
+        if: ${{ !env.ACT && env.CC_TOKEN && matrix.stability == 'prefer-stable' && matrix.php == '8.4' }}

@@ -1,0 +1,184 @@
+<?php
+
+namespace Tests;
+
+use Henzeb\Pennant\Unleash\Providers\PennantUnleashServiceProvider;
+use Illuminate\Support\Facades\Http;
+use Laravel\Pennant\PennantServiceProvider;
+use Orchestra\Testbench\TestCase as BaseTestCase;
+
+class TestCase extends BaseTestCase
+{
+    protected function getPackageProviders($app): array
+    {
+        return [
+            PennantServiceProvider::class,
+            PennantUnleashServiceProvider::class,
+        ];
+    }
+
+    private function unleashAdmin(): \Illuminate\Http\Client\PendingRequest
+    {
+        return Http::withHeaders(['Authorization' => env('UNLEASH_ADMIN_TOKEN')])
+            ->baseUrl(env('UNLEASH_ADMIN_URL'))
+            ->retry(5, 200, throw: false);
+    }
+
+    protected function createUnleashFeature(string $name, bool $enabled = false): void
+    {
+        $this->unleashAdmin()->post('/projects/default/features', ['name' => $name, 'type' => 'release']);
+
+        if ($enabled) {
+            $this->enableUnleashFeature($name);
+        }
+    }
+
+    protected function enableUnleashFeature(string $name, string $environment = 'development'): void
+    {
+        $this->unleashAdmin()->post("/projects/default/features/{$name}/environments/{$environment}/on", ['enabled' => true]);
+        $this->waitForUnleashClientApi(fn(array $features) => collect($features)->contains('name', $name));
+    }
+
+    protected function addUnleashVariant(string $featureName, string $variantName, ?array $payload = null, string $environment = 'development'): void
+    {
+        $strategies = $this->unleashAdmin()
+            ->get("/projects/default/features/{$featureName}/environments/{$environment}/strategies")
+            ->json();
+        $strategyId = $strategies[0]['id'] ?? null;
+
+        $existing = collect($strategies[0]['variants'] ?? [])
+            ->map(fn($v) => array_intersect_key($v, array_flip(['name', 'weight', 'weightType', 'stickiness', 'payload'])))
+            ->all();
+
+        $variant = ['name' => $variantName, 'weight' => 1000, 'weightType' => 'variable', 'stickiness' => 'default'];
+
+        if ($payload !== null) {
+            $variant['payload'] = $payload;
+        }
+
+        $this->unleashAdmin()->patch(
+            "/projects/default/features/{$featureName}/environments/{$environment}/strategies/{$strategyId}",
+            [['op' => 'replace', 'path' => '/variants', 'value' => [...$existing, $variant]]]
+        );
+
+        $this->waitForUnleashClientApi(fn(array $features) => collect($features)
+            ->firstWhere('name', $featureName)['strategies'][0]['variants'][0]['name'] ?? null === $variantName
+        );
+    }
+
+    protected function createUserWithIdFeature(string $name, string ...$userIds): void
+    {
+        $this->unleashAdmin()->post('/projects/default/features', ['name' => $name, 'type' => 'release']);
+
+        $this->unleashAdmin()->post(
+            "/projects/default/features/{$name}/environments/development/strategies",
+            [
+                'name' => 'default',
+                'parameters' => (object) [],
+                'constraints' => [['contextName' => 'userId', 'operator' => 'IN', 'values' => $userIds]],
+                'segments' => [],
+            ]
+        );
+
+        $this->enableUnleashFeature($name);
+        $this->waitForStrategyConstraints($name, [['contextName' => 'userId', 'values' => $userIds]]);
+    }
+
+    protected function createStringScopeFeature(string $name, string $scope): void
+    {
+        $this->unleashAdmin()->post('/projects/default/features', ['name' => $name, 'type' => 'release']);
+
+        $this->unleashAdmin()->post(
+            "/projects/default/features/{$name}/environments/development/strategies",
+            [
+                'name' => 'default',
+                'parameters' => (object) [],
+                'constraints' => [['contextName' => 'scope', 'operator' => 'IN', 'values' => [$scope]]],
+                'segments' => [],
+            ]
+        );
+
+        $this->enableUnleashFeature($name);
+        $this->waitForStrategyConstraints($name, [['contextName' => 'scope', 'values' => [$scope]]]);
+    }
+
+    protected function createModelScopeFeature(string $name, string $class, string $id): void
+    {
+        $this->unleashAdmin()->post('/projects/default/features', ['name' => $name, 'type' => 'release']);
+
+        $this->unleashAdmin()->post(
+            "/projects/default/features/{$name}/environments/development/strategies",
+            [
+                'name' => 'default',
+                'parameters' => (object) [],
+                'constraints' => [
+                    ['contextName' => 'class', 'operator' => 'IN', 'values' => [$class]],
+                    ['contextName' => 'id', 'operator' => 'IN', 'values' => [$id]],
+                ],
+                'segments' => [],
+            ]
+        );
+
+        $this->enableUnleashFeature($name);
+        $this->waitForStrategyConstraints($name, [
+            ['contextName' => 'class', 'values' => [$class]],
+            ['contextName' => 'id', 'values' => [$id]],
+        ]);
+    }
+
+    /**
+     * Waits until the feature's first strategy reports the given constraints, since
+     * enabling a feature does not guarantee its strategy constraints have propagated yet.
+     *
+     * @param array<int, array{contextName: string, values: array<string>}> $expectedConstraints
+     */
+    private function waitForStrategyConstraints(string $name, array $expectedConstraints): void
+    {
+        $this->waitForUnleashClientApi(function (array $features) use ($name, $expectedConstraints) {
+            $constraints = collect($features)->firstWhere('name', $name)['strategies'][0]['constraints'] ?? [];
+
+            foreach ($expectedConstraints as $expected) {
+                $match = collect($constraints)->first(fn(array $constraint) => $constraint['contextName'] === $expected['contextName']);
+
+                if (($match['values'] ?? null) !== $expected['values']) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+    }
+
+    protected function deleteUnleashFeature(string $name): void
+    {
+        $this->unleashAdmin()->delete("/projects/default/features/{$name}");
+        $this->unleashAdmin()->delete("/archive/{$name}");
+    }
+
+    private function waitForUnleashClientApi(callable $condition, int $timeoutMs = 3000): void
+    {
+        $deadline = microtime(true) + $timeoutMs / 1000;
+        $consecutive = 0;
+        do {
+            $features = $this->fetchUnleashClientFeatures();
+            if ($condition($features)) {
+                if (++$consecutive >= 2) {
+                    usleep(300_000);
+                    $this->fetchUnleashClientFeatures();
+                    return;
+                }
+            } else {
+                $consecutive = 0;
+            }
+            usleep(50_000);
+        } while (microtime(true) < $deadline);
+    }
+
+    private function fetchUnleashClientFeatures(): array
+    {
+        return Http::withHeaders(['Authorization' => env('UNLEASH_API_KEY')])
+            ->retry(5, 200, throw: false)
+            ->get(env('UNLEASH_URL') . '/client/features')
+            ->json('features') ?? [];
+    }
+}

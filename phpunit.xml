@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/11.0/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+         cacheDirectory=".phpunit.cache"
+>
+  <testsuites>
+    <testsuite name="Unit">
+      <directory suffix="Test.php">./tests/Unit</directory>
+    </testsuite>
+    <testsuite name="Integration">
+      <directory suffix="Test.php">./tests/Integration</directory>
+    </testsuite>
+  </testsuites>
+  <php>
+    <server name="APP_ENV" value="testing"/>
+    <server name="CACHE_DRIVER" value="array"/>
+    <server name="QUEUE_CONNECTION" value="sync"/>
+    <server name="SESSION_DRIVER" value="array"/>
+    <server name="UNLEASH_URL" value="http://localhost:4242/api"/>
+    <server name="UNLEASH_INSTANCE_ID" value="pennant-tests"/>
+    <server name="UNLEASH_APP_NAME" value="pennant-tests"/>
+    <server name="UNLEASH_API_KEY" value="default:development.test-api-token"/>
+    <server name="UNLEASH_ADMIN_URL" value="http://localhost:4242/api/admin"/>
+    <server name="UNLEASH_ADMIN_TOKEN" value="*:*.test-admin-token"/>
+  </php>
+  <source>
+    <include>
+      <directory suffix=".php">./src</directory>
+    </include>
+  </source>
+</phpunit>

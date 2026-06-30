@@ -1,0 +1,62 @@
+{
+    "name": "henzeb/laravel-pennant-unleash",
+    "description": "An Unleash driver for Laravel Pennant",
+    "keywords": [
+        "henzeb",
+        "laravel",
+        "pennant",
+        "unleash",
+        "feature flags"
+    ],
+    "homepage": "https://github.com/henzeb/laravel-pennant-unleash",
+    "license": "MIT",
+    "type": "library",
+    "authors": [
+        {
+            "name": "Henze Berkheij",
+            "email": "henzeberkheij@gmail.com",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "laravel/pennant": "^1.0",
+        "unleash/client": "^2.9.283"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^9.0|^11.0",
+        "pestphp/pest": "^3.0|^4.0",
+        "pestphp/pest-plugin-laravel": "^3.0|^4.0",
+        "phpstan/phpstan": "^1.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "Henzeb\\Pennant\\Unleash\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/pest",
+        "test-coverage-txt": "vendor/bin/pest --coverage",
+        "test-coverage": "XDEBUG_MODE=coverage vendor/bin/pest --coverage-html coverage",
+        "test-dox": "vendor/bin/pest --testdox"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "php-http/discovery": true
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Henzeb\\Pennant\\Unleash\\Providers\\PennantUnleashServiceProvider"
+            ]
+        }
+    }
+}
