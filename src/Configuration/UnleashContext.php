@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Henzeb\Pennant\Unleash\Configuration;
 
 use DateTimeImmutable;
@@ -70,9 +72,9 @@ final class UnleashContext implements Context, FeatureScopeSerializeable
     #[Override]
     public function getIpAddress(): ?string
     {
-        assert(is_string($_SERVER['REMOTE_ADDR']) || $_SERVER['REMOTE_ADDR'] === null);
+        $remoteAddress = $_SERVER['REMOTE_ADDR'] ?? null;
 
-        return $this->ipAddress ?? $_SERVER['REMOTE_ADDR'] ?? null;
+        return $this->ipAddress ?? (is_string($remoteAddress) ? $remoteAddress : null);
     }
 
     #[Override]

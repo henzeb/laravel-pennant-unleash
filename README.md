@@ -24,6 +24,8 @@ Unleash handles all flag evaluation.
   - [FeatureScopeable](#featurescopeable)
   - [Custom context resolver](#custom-context-resolver)
 - [Variants](#variants)
+- [Defining local fallbacks](#defining-local-fallbacks)
+- [Development mode](#development-mode)
 - [Testing this package](#testing-this-package)
 - [Changelog](#changelog)
 - [Contributing](#contributing)
@@ -238,6 +240,76 @@ Feature::value('my-feature');
 // 'hello'                  — variant with a string/csv payload
 // ['foo' => 'bar']         — variant with a json payload
 ```
+
+## Defining local fallbacks
+
+Because this driver reads flags from Unleash, `Feature::define()` doesn't register an initial value the way it does
+for Pennant's built-in drivers. Instead, it registers a **fallback** resolver that only runs when the feature
+doesn't exist in Unleash yet — for example, before the toggle has been created there, or in an environment where
+it hasn't been rolled out. Once the toggle exists in Unleash, the fallback is ignored and Unleash's evaluation is
+used instead.
+
+Without a fallback, a feature that doesn't exist in Unleash simply resolves to `false`. A fallback is only useful
+when you need something other than that:
+
+- a **fail-open** default (e.g. `true`) for a toggle that should behave as enabled until it's deliberately created
+  and configured in Unleash;
+- a **non-boolean default**, since without a fallback an undefined feature resolves to the boolean `false`, which
+  won't match code expecting a string or decoded JSON payload from `Feature::value()`;
+- an **environment-specific default**, e.g. `true` locally while every environment that matters defaults to `false`
+  in production until someone enables the toggle there.
+
+```php
+Feature::define('my-feature', fn (mixed $scope) => true);
+```
+
+Register this in a service provider's `boot()` method, same as any other `Feature::define()` call.
+
+A feature that only has a local fallback (and doesn't exist in Unleash) won't show up in `Feature::for($scope)->all()`
+— it's only used when the feature is checked directly, e.g. via `Feature::active()` or `Feature::value()`.
+
+## Development mode
+
+If you don't have an Unleash server available for local development at all, you may enable development mode
+instead, which makes the driver evaluate features from a local JSON file and never contact Unleash:
+
+```dotenv
+UNLEASH_DEVELOPMENT=true
+UNLEASH_BOOTSTRAP_FILE=/path/to/unleash-features.json
+```
+
+The file must contain feature definitions in the same shape Unleash's own
+[client feature API](https://docs.getunleash.io/reference/api/unleash/features) returns them — this is passed
+directly to the underlying SDK's own
+[bootstrap](https://docs.getunleash.io/sdks/php#bootstrap) support, so strategies, constraints, and variants are
+evaluated exactly as they would be against a real server:
+
+```json
+{
+    "features": [
+        {
+            "name": "my-feature",
+            "enabled": true,
+            "strategies": [
+                {
+                    "name": "default",
+                    "parameters": {},
+                    "constraints": [
+                        { "contextName": "scope", "operator": "IN", "values": ["42"] }
+                    ]
+                }
+            ]
+        }
+    ]
+}
+```
+
+While development mode is enabled, no `app_url`, `api_key`, or `instance_id` configuration is required. A feature
+not present in the file still falls back to any resolver you registered with `Feature::define()`, exactly as it
+would against a real server; if neither applies, it simply resolves to `false`.
+
+If development mode is enabled without `unleash.bootstrap_file` configured, or the configured file doesn't exist,
+an exception is thrown — this is a misconfiguration, not a state the driver silently works around.
 
 ## Testing this package
 

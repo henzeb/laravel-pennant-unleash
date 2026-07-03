@@ -1,6 +1,7 @@
 <?php
 
 use Henzeb\Pennant\Unleash\Configuration\UnleashContext;
+use Henzeb\Pennant\Unleash\Drivers\UnleashDriver;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Laravel\Pennant\Contracts\FeatureScopeable;
 use Laravel\Pennant\Feature;

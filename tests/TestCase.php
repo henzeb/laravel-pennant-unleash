@@ -17,6 +17,11 @@ class TestCase extends BaseTestCase
         ];
     }
 
+    protected function getEnvironmentSetUp($app): void
+    {
+        $app['config']->set('pennant.stores.unleash', ['driver' => 'unleash']);
+    }
+
     private function unleashAdmin(): \Illuminate\Http\Client\PendingRequest
     {
         return Http::withHeaders(['Authorization' => env('UNLEASH_ADMIN_TOKEN')])
@@ -36,7 +41,9 @@ class TestCase extends BaseTestCase
     protected function enableUnleashFeature(string $name, string $environment = 'development'): void
     {
         $this->unleashAdmin()->post("/projects/default/features/{$name}/environments/{$environment}/on", ['enabled' => true]);
-        $this->waitForUnleashClientApi(fn(array $features) => collect($features)->contains('name', $name));
+        $this->waitForUnleashClientApi(
+            fn(array $features) => collect($features)->firstWhere('name', $name)['enabled'] ?? false
+        );
     }
 
     protected function addUnleashVariant(string $featureName, string $variantName, ?array $payload = null, string $environment = 'development'): void
@@ -155,17 +162,19 @@ class TestCase extends BaseTestCase
         $this->unleashAdmin()->delete("/archive/{$name}");
     }
 
-    private function waitForUnleashClientApi(callable $condition, int $timeoutMs = 3000): void
+    private function waitForUnleashClientApi(callable $condition, int $timeoutMs = 5000): void
     {
         $deadline = microtime(true) + $timeoutMs / 1000;
         $consecutive = 0;
         do {
             $features = $this->fetchUnleashClientFeatures();
             if ($condition($features)) {
-                if (++$consecutive >= 2) {
-                    usleep(300_000);
-                    $this->fetchUnleashClientFeatures();
-                    return;
+                if (++$consecutive >= 3) {
+                    usleep(500_000);
+                    if ($condition($this->fetchUnleashClientFeatures())) {
+                        return;
+                    }
+                    $consecutive = 0;
                 }
             } else {
                 $consecutive = 0;

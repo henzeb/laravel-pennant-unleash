@@ -14,7 +14,6 @@ class PennantUnleashServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__ . '/../../config/unleash.php', 'unleash');
-        $this->app['config']->set('pennant.stores.unleash', ['driver' => 'unleash']);
     }
 
     public function boot(): void

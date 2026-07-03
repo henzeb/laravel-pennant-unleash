@@ -1,5 +1,6 @@
 <?php
 
+use Henzeb\Pennant\Unleash\Drivers\UnleashDriver;
 use Laravel\Pennant\Feature;
 use Unleash\Client\UnleashBuilder;
 

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Henzeb\Pennant\Unleash\Drivers;
 
 use Closure;
@@ -26,6 +28,9 @@ class UnleashDriver implements Driver, DefinesFeaturesExternally
 
     private ?UnleashBuilder $builder = null;
 
+    /** @var array<string, callable> */
+    private array $resolvers = [];
+
     public function __construct(private readonly UnleashBuilder $defaultBuilder)
     {
     }
@@ -44,13 +49,28 @@ class UnleashDriver implements Driver, DefinesFeaturesExternally
 
     private function builder(): UnleashBuilder
     {
+        if ($this->builder !== null) {
+            return $this->builder;
+        }
 
-        return $this->builder ??= $this->getClientResolver()($this->defaultBuilder
+        $builder = $this->defaultBuilder
             ->withAppUrl(config()->string('unleash.app_url', ''))
             ->withInstanceId(config()->string('unleash.instance_id', ''))
             ->withAppName(config()->string('unleash.app_name', ''))
             ->withHeader('Authorization', config()->string('unleash.api_key', ''))
-            ->withCacheHandler(Cache::store(config()->string('unleash.cache_driver'))));
+            ->withCacheHandler(Cache::store(config()->string('unleash.cache_driver')));
+
+        $builder = $this->getClientResolver()($builder);
+
+        if (config()->boolean('unleash.development', false)) {
+            $bootstrapFile = config('unleash.bootstrap_file');
+
+            $builder = $builder
+                ->withFetchingEnabled(false)
+                ->withBootstrapFile(is_string($bootstrapFile) ? $bootstrapFile : null);
+        }
+
+        return $this->builder = $builder;
     }
 
     private function getClientResolver(): Closure
@@ -74,14 +94,10 @@ class UnleashDriver implements Driver, DefinesFeaturesExternally
 
     public function define(string $feature, callable $resolver): void
     {
+        $this->resolvers[$feature] = $resolver;
     }
 
     public function defined(): array
-    {
-        return [];
-    }
-
-    public function definedFeaturesForScope(mixed $scope): array
     {
         $features = [];
         foreach ($this->repository()->getFeatures() as $feature) {
@@ -89,6 +105,16 @@ class UnleashDriver implements Driver, DefinesFeaturesExternally
         }
 
         return $features;
+    }
+
+    /**
+     * Unleash toggles are not scoped by existence, only by evaluated state, so
+     * every toggle is "defined" regardless of $scope. Whether a feature is
+     * enabled for a given scope is determined separately by get().
+     */
+    public function definedFeaturesForScope(mixed $scope): array
+    {
+        return $this->defined();
     }
 
     public function getAll(array $features): array
@@ -138,6 +164,10 @@ class UnleashDriver implements Driver, DefinesFeaturesExternally
 
     public function get(string $feature, mixed $scope): mixed
     {
+        if (isset($this->resolvers[$feature]) && !$this->repository()->findFeature($feature)) {
+            return ($this->resolvers[$feature])($scope);
+        }
+
         $variant = $this->client()->getVariant(
             $feature,
             $this->resolveContext($scope)
