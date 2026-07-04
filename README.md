@@ -16,6 +16,11 @@ Unleash handles all flag evaluation.
 
 - [Installation](#installation)
   - [Custom client builder](#custom-client-builder)
+- [Configuration](#configuration)
+  - [Caching](#caching)
+  - [Custom strategies](#custom-strategies)
+  - [Events](#events)
+  - [Metrics reporting](#metrics-reporting)
 - [Context](#context)
   - [Authenticated users](#authenticated-users)
   - [Eloquent models](#eloquent-models)
@@ -96,6 +101,101 @@ Feature::buildUnleashClientUsing(function (UnleashBuilder $builder): UnleashBuil
         ->withAppName(config('unleash.app_name'));
 });
 ```
+
+## Configuration
+
+### Caching
+
+Toggle state fetched from Unleash is cached, and refreshed once the cache expires. Configure this in
+`config/unleash.php`:
+
+```php
+'cache' => [
+    'driver' => env('UNLEASH_CACHE_DRIVER', env('CACHE_DRIVER')),
+    'ttl' => env('UNLEASH_CACHE_TTL', 15), // seconds
+
+    'stale_driver' => env('UNLEASH_STALE_CACHE_DRIVER'),
+    'stale_ttl' => env('UNLEASH_STALE_CACHE_TTL', 30 * 60), // seconds
+],
+```
+
+`stale_driver` is optional and only used as a fallback when Unleash can't be reached and the main cache has already
+expired; it defaults to the same store as `driver`. `stale_ttl` controls how long that stale cache remains
+acceptable to serve.
+
+### Custom strategies
+
+If you have [custom activation strategies](https://docs.getunleash.io/reference/custom-activation-strategies),
+list their handler classes in `config/unleash.php`:
+
+```php
+'strategies' => [
+    App\Unleash\Strategies\MyCustomStrategy::class,
+],
+```
+
+Each class is resolved through Laravel's container, so constructor dependencies are injected automatically, and
+is added alongside the client's built-in strategy handlers.
+
+### Events
+
+The underlying Unleash client fires its own events for things Pennant itself doesn't tell you about — a feature
+being queried that doesn't exist in Unleash, a feature evaluating as disabled, a strategy Unleash sent that no
+registered handler understands, a background fetch failing, or impression data being recorded. This package maps
+each of those to a plain Laravel event, so you can listen for them the normal way:
+
+```php
+use Henzeb\Pennant\Unleash\Events\FeatureToggleNotFound;
+use Illuminate\Support\Facades\Event;
+
+Event::listen(function (FeatureToggleNotFound $event) {
+    Log::warning("Feature [{$event->featureName}] was checked but does not exist in Unleash.");
+});
+```
+
+| Event | Fired when | Properties |
+|---|---|---|
+| `FeatureToggleNotFound` | A queried feature doesn't exist in Unleash | `context`, `featureName` |
+| `FeatureToggleDisabled` | A feature exists but evaluated to disabled | `feature`, `context` |
+| `FeatureToggleMissingStrategyHandler` | A feature has a strategy no registered handler supports | `context`, `feature` |
+| `FetchingDataFailed` | The background fetch from the Unleash server failed | `exception` |
+| `ImpressionDataReceived` | A feature with [impression data](https://docs.getunleash.io/reference/impression-data) enabled was evaluated | `eventType`, `eventId`, `context`, `enabled`, `featureName`, `variant` |
+
+All classes live under `Henzeb\Pennant\Unleash\Events`. This is off by default; enable it in `config/unleash.php`:
+
+```php
+'events' => env('UNLEASH_EVENTS_ENABLED', false),
+```
+
+### Metrics reporting
+
+By default, the client reports feature usage back to Unleash every 60 seconds, which drives the "last seen" and
+usage metrics in the Unleash admin UI. Configure this in `config/unleash.php`:
+
+```php
+'metrics' => [
+    'enabled' => env('UNLEASH_METRICS_ENABLED', true),
+    'interval' => env('UNLEASH_METRICS_INTERVAL', 60_000), // milliseconds
+    'handler' => DefaultMetricsHandler::class,
+],
+```
+
+`handler` must be a class implementing `Unleash\Client\Metrics\MetricsHandler`. It's resolved through Laravel's
+container, so constructor dependencies are injected automatically. Swap it for your own class to replace the
+client's default metrics handler.
+
+### Variant handler
+
+Variant assignment (which variant a user falls into for a feature with variants configured) is delegated to a
+handler. Configure it in `config/unleash.php`:
+
+```php
+'variant_handler' => DefaultVariantHandler::class,
+```
+
+`variant_handler` must be a class implementing `Unleash\Client\Variant\VariantHandler`. It's resolved through
+Laravel's container, so constructor dependencies are injected automatically. Swap it for your own class to
+replace the client's default variant handler.
 
 ## Context
 

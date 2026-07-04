@@ -2,11 +2,8 @@
 
 use Henzeb\Pennant\Unleash\Drivers\UnleashDriver;
 use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Support\Arr;
 use Mockery\MockInterface;
 use Tests\Fixtures\ScopedModel;
-use Unleash\Client\Bootstrap\EmptyBootstrapProvider;
-use Unleash\Client\Bootstrap\FileBootstrapProvider;
 use Unleash\Client\Configuration\Context;
 use Unleash\Client\DTO\DefaultFeature;
 use Unleash\Client\DTO\DefaultVariant;
@@ -41,37 +38,6 @@ function driverWithMocks(UnleashRepository&MockInterface $repository, Unleash&Mo
     $clientProperty->setValue($driver, $client);
 
     return $driver;
-}
-
-/**
- * Invokes the driver's private, lazily-memoized builder() method, which
- * assembles the UnleashBuilder from config without ever reaching the network.
- */
-function callBuilder(UnleashDriver $driver): UnleashBuilder
-{
-    $reflection = new ReflectionClass($driver);
-    $method = $reflection->getMethod('builder');
-    $method->setAccessible(true);
-
-    return $method->invoke($driver);
-}
-
-function builderProperty(UnleashBuilder $builder, string $property): mixed
-{
-    $reflection = new ReflectionProperty($builder, $property);
-    $reflection->setAccessible(true);
-
-    return $reflection->getValue($builder);
-}
-
-/**
- * Removes the given unleash.* config keys entirely, as opposed to setting
- * them to null, so config()->string()/boolean() actually fall back to
- * their defaults instead of failing on an explicit null value.
- */
-function forgetUnleashConfig(string ...$keys): void
-{
-    config()->set('unleash', Arr::except(config('unleash'), $keys));
 }
 
 it('uses the locally defined resolver when the feature is not found in unleash', function () {
@@ -298,69 +264,6 @@ it('resets the context resolver to the default when null is passed', function ()
     $driver->resolveUnleashContextUsing(null);
 
     expect($driver->getContextResolver()('untouched'))->toBe('untouched');
-});
-
-it('passes the configured app url, instance id, app name and api key to the client builder', function () {
-    config()->set('unleash.app_url', 'https://unleash.test');
-    config()->set('unleash.instance_id', 'instance-1');
-    config()->set('unleash.app_name', 'my-app');
-    config()->set('unleash.api_key', 'secret-key');
-
-    $builder = callBuilder(new UnleashDriver(UnleashBuilder::create()));
-
-    expect(builderProperty($builder, 'appUrl'))->toBe('https://unleash.test')
-        ->and(builderProperty($builder, 'instanceId'))->toBe('instance-1')
-        ->and(builderProperty($builder, 'appName'))->toBe('my-app')
-        ->and(builderProperty($builder, 'headers'))->toBe(['Authorization' => 'secret-key']);
-});
-
-it('falls back to empty strings for the app url, instance id, app name and api key when not configured', function () {
-    forgetUnleashConfig('app_url', 'instance_id', 'app_name', 'api_key');
-
-    $builder = callBuilder(new UnleashDriver(UnleashBuilder::create()));
-
-    expect(builderProperty($builder, 'appUrl'))->toBe('')
-        ->and(builderProperty($builder, 'instanceId'))->toBe('')
-        ->and(builderProperty($builder, 'appName'))->toBe('')
-        ->and(builderProperty($builder, 'headers'))->toBe(['Authorization' => '']);
-});
-
-it('does not enable development mode when unleash.development is false', function () {
-    config()->set('unleash.development', false);
-
-    $builder = callBuilder(new UnleashDriver(UnleashBuilder::create()));
-
-    expect(builderProperty($builder, 'fetchingEnabled'))->toBeTrue()
-        ->and(builderProperty($builder, 'bootstrapProvider'))->toBeNull();
-});
-
-it('defaults to disabled development mode when unleash.development is not configured', function () {
-    forgetUnleashConfig('development');
-
-    $builder = callBuilder(new UnleashDriver(UnleashBuilder::create()));
-
-    expect(builderProperty($builder, 'fetchingEnabled'))->toBeTrue()
-        ->and(builderProperty($builder, 'bootstrapProvider'))->toBeNull();
-});
-
-it('disables fetching and bootstraps from the configured file when unleash.development is true', function () {
-    config()->set('unleash.development', true);
-    config()->set('unleash.bootstrap_file', '/tmp/unleash-features.json');
-
-    $builder = callBuilder(new UnleashDriver(UnleashBuilder::create()));
-
-    expect(builderProperty($builder, 'fetchingEnabled'))->toBeFalse()
-        ->and(builderProperty($builder, 'bootstrapProvider'))->toBeInstanceOf(FileBootstrapProvider::class);
-});
-
-it('bootstraps from an empty provider when unleash.development is true without a bootstrap file', function () {
-    config()->set('unleash.development', true);
-    config()->set('unleash.bootstrap_file', null);
-
-    $builder = callBuilder(new UnleashDriver(UnleashBuilder::create()));
-
-    expect(builderProperty($builder, 'fetchingEnabled'))->toBeFalse()
-        ->and(builderProperty($builder, 'bootstrapProvider'))->toBeInstanceOf(EmptyBootstrapProvider::class);
 });
 
 it('builds the client only once, applying the custom client builder callback', function () {

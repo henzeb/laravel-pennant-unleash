@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Henzeb\Pennant\Unleash\Drivers;
 
 use Closure;
+use Henzeb\Pennant\Unleash\Configuration\UnleashClientBuilder;
 use Henzeb\Pennant\Unleash\Configuration\UnleashContext;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Cache;
 use Laravel\Pennant\Contracts\DefinesFeaturesExternally;
 use Laravel\Pennant\Contracts\Driver;
 use Unleash\Client\Configuration\Context;
@@ -49,28 +49,7 @@ class UnleashDriver implements Driver, DefinesFeaturesExternally
 
     private function builder(): UnleashBuilder
     {
-        if ($this->builder !== null) {
-            return $this->builder;
-        }
-
-        $builder = $this->defaultBuilder
-            ->withAppUrl(config()->string('unleash.app_url', ''))
-            ->withInstanceId(config()->string('unleash.instance_id', ''))
-            ->withAppName(config()->string('unleash.app_name', ''))
-            ->withHeader('Authorization', config()->string('unleash.api_key', ''))
-            ->withCacheHandler(Cache::store(config()->string('unleash.cache_driver')));
-
-        $builder = $this->getClientResolver()($builder);
-
-        if (config()->boolean('unleash.development', false)) {
-            $bootstrapFile = config('unleash.bootstrap_file');
-
-            $builder = $builder
-                ->withFetchingEnabled(false)
-                ->withBootstrapFile(is_string($bootstrapFile) ? $bootstrapFile : null);
-        }
-
-        return $this->builder = $builder;
+        return $this->builder ??= (new UnleashClientBuilder())->build($this->defaultBuilder, $this->getClientResolver());
     }
 
     private function getClientResolver(): Closure

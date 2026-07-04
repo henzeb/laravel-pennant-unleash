@@ -73,6 +73,37 @@ class TestCase extends BaseTestCase
         );
     }
 
+    protected function createCustomStrategyFeature(string $name, string $strategyName): void
+    {
+        $this->unleashAdmin()->post('/strategies', [
+            'name' => $strategyName,
+            'description' => 'created for tests',
+            'parameters' => [],
+        ]);
+
+        $this->unleashAdmin()->post('/projects/default/features', ['name' => $name, 'type' => 'release']);
+
+        $this->unleashAdmin()->post(
+            "/projects/default/features/{$name}/environments/development/strategies",
+            [
+                'name' => $strategyName,
+                'parameters' => (object) [],
+                'constraints' => [],
+                'segments' => [],
+            ]
+        );
+
+        $this->enableUnleashFeature($name);
+        $this->waitForUnleashClientApi(
+            fn(array $features) => (collect($features)->firstWhere('name', $name)['strategies'][0]['name'] ?? null) === $strategyName
+        );
+    }
+
+    protected function deleteUnleashStrategy(string $strategyName): void
+    {
+        $this->unleashAdmin()->delete("/strategies/{$strategyName}");
+    }
+
     protected function createUserWithIdFeature(string $name, string ...$userIds): void
     {
         $this->unleashAdmin()->post('/projects/default/features', ['name' => $name, 'type' => 'release']);
