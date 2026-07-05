@@ -1,6 +1,7 @@
 <?php
 
 use Henzeb\Pennant\Unleash\Configuration\UnleashContext;
+use Illuminate\Contracts\Support\Arrayable;
 use Unleash\Client\Enum\ContextField;
 use Unleash\Client\Enum\Stickiness;
 use Unleash\Client\Exception\InvalidValueException;
@@ -27,6 +28,19 @@ it('makes a context with all supported values', function () {
         ->and($context->getCurrentTime()->format(DATE_ATOM))->toBe('2026-06-30T12:00:00+00:00');
 });
 
+it('constructs with custom context from an arrayable', function () {
+    $customContext = new class implements Arrayable {
+        public function toArray(): array
+        {
+            return ['tenant' => 'tenant-id'];
+        }
+    };
+
+    $context = new UnleashContext(customContext: $customContext);
+
+    expect($context->getCustomProperty('tenant'))->toBe('tenant-id');
+});
+
 it('falls back to the server remote address when no ip address is given', function () {
     $_SERVER['REMOTE_ADDR'] = '203.0.113.42';
 
@@ -51,6 +65,48 @@ it('stores a null custom property value as an empty string', function () {
     expect($context->getCustomProperty('tenant'))->toBe('');
 });
 
+it('replaces all custom properties with an array', function () {
+    $context = UnleashContext::make(customContext: ['tenant' => 'tenant-id']);
+
+    expect($context->setCustomProperties(['plan' => 'enterprise']))->toBe($context)
+        ->and($context->getCustomProperties())->toBe(['plan' => 'enterprise']);
+});
+
+it('replaces all custom properties with an arrayable', function () {
+    $properties = new class implements Arrayable {
+        public function toArray(): array
+        {
+            return ['plan' => 'enterprise'];
+        }
+    };
+
+    $context = UnleashContext::make(customContext: ['tenant' => 'tenant-id']);
+
+    expect($context->setCustomProperties($properties))->toBe($context)
+        ->and($context->getCustomProperties())->toBe(['plan' => 'enterprise']);
+});
+
+it('merges custom properties from an array', function () {
+    $context = UnleashContext::make(customContext: ['tenant' => 'tenant-id']);
+
+    expect($context->withCustomProperties(['plan' => 'enterprise']))->toBe($context)
+        ->and($context->getCustomProperties())->toBe(['tenant' => 'tenant-id', 'plan' => 'enterprise']);
+});
+
+it('merges custom properties from an arrayable', function () {
+    $properties = new class implements Arrayable {
+        public function toArray(): array
+        {
+            return ['plan' => 'enterprise'];
+        }
+    };
+
+    $context = UnleashContext::make(customContext: ['tenant' => 'tenant-id']);
+
+    expect($context->withCustomProperties($properties))->toBe($context)
+        ->and($context->getCustomProperties())->toBe(['tenant' => 'tenant-id', 'plan' => 'enterprise']);
+});
+
 it('falls back to the machine hostname when none is given', function () {
     expect(UnleashContext::make()->getHostname())->toBe(gethostname());
 });
@@ -70,7 +126,7 @@ it('serializes all context values for feature scoping', function () {
         'ipAddress' => '127.0.0.1',
         'sessionId' => 'session-id',
         'environment' => 'testing',
-        'customContext' => ['tenant' => 'tenant-id', 'hostname' => 'app-host'],
+        'customContext' => ['hostname' => 'app-host', 'tenant' => 'tenant-id'],
     ]);
 });
 

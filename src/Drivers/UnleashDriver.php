@@ -7,11 +7,15 @@ namespace Henzeb\Pennant\Unleash\Drivers;
 use Closure;
 use Henzeb\Pennant\Unleash\Configuration\UnleashClientBuilder;
 use Henzeb\Pennant\Unleash\Configuration\UnleashContext;
+use Henzeb\Pennant\Unleash\DTO\UnleashVariant;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Laravel\Pennant\Contracts\DefinesFeaturesExternally;
 use Laravel\Pennant\Contracts\Driver;
 use Unleash\Client\Configuration\Context;
+use Unleash\Client\DTO\DefaultFeature;
+use Unleash\Client\DTO\Feature;
+use Unleash\Client\DTO\Variant;
 use Unleash\Client\Enum\VariantPayloadType;
 use Unleash\Client\Repository\UnleashRepository;
 use Unleash\Client\Unleash;
@@ -113,6 +117,7 @@ class UnleashDriver implements Driver, DefinesFeaturesExternally
     {
         return $this->contextResolver ??= fn(mixed $context) => $context;
     }
+
     private function resolveContext(mixed $scope): ?Context
     {
         $scope = $this->getContextResolver()($scope);
@@ -121,15 +126,15 @@ class UnleashDriver implements Driver, DefinesFeaturesExternally
             return UnleashContext::make(customContext: ['scope' => $scope]);
         }
 
-        if($scope instanceof Authenticatable) {
+        if ($scope instanceof Authenticatable) {
             return UnleashContext::make(currentUserId: (string)$scope->getAuthIdentifier());
         }
 
-        if($scope instanceof Model) {
+        if ($scope instanceof Model) {
             return UnleashContext::make(
                 customContext: [
-                    'class' => $scope->getMorphClass(),
-                    'id' => (string) $scope->getKey()
+                    'model' => $scope->getMorphClass(),
+                    'key' => (string)$scope->getKey()
                 ]
             );
         }
@@ -143,17 +148,38 @@ class UnleashDriver implements Driver, DefinesFeaturesExternally
 
     public function get(string $feature, mixed $scope): mixed
     {
-        if (isset($this->resolvers[$feature]) && !$this->repository()->findFeature($feature)) {
-            return ($this->resolvers[$feature])($scope);
+        $featureName = $feature;
+        $feature = $this->repository()->findFeature($feature);
+
+        if (!$feature) {
+            if (isset($this->resolvers[$featureName])) {
+                return $this->resolveDefault($featureName, $scope);
+            }
+
+            return $this->client()->isEnabled(
+                $featureName,
+                $this->resolveContext($scope)
+            );
+        }
+
+        if (!$this->hasVariants($feature)) {
+            $default = $this->resolveDefault($featureName, $scope);
+
+            return $this->client()->isEnabled(
+                $featureName,
+                $this->resolveContext($scope),
+                is_bool($default) ? $default : false
+            );
         }
 
         $variant = $this->client()->getVariant(
-            $feature,
-            $this->resolveContext($scope)
+            $featureName,
+            $this->resolveContext($scope),
+            $this->resolveVariantDefault($featureName, $scope)
         );
 
         if (!$variant->isEnabled()) {
-            return $variant->isFeatureEnabled();
+            return false;
         }
 
         $payload = $variant->getPayload();
@@ -169,6 +195,26 @@ class UnleashDriver implements Driver, DefinesFeaturesExternally
         };
     }
 
+    private function resolveDefault(string $feature, mixed $scope): mixed
+    {
+        return ($this->resolvers[$feature] ?? fn() => false)($scope);
+    }
+
+    private function hasVariants(Feature $feature): bool
+    {
+        if (count($feature->getVariants())) {
+            return true;
+        }
+
+        foreach ($feature->getStrategies() as $strategy) {
+            if (count($strategy->getVariants())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function set(string $feature, mixed $scope, mixed $value): void
     {
     }
@@ -181,7 +227,26 @@ class UnleashDriver implements Driver, DefinesFeaturesExternally
     {
     }
 
+    /**
+     * @param array<string>|null $features
+     * @return void
+     */
     public function purge(?array $features): void
     {
+    }
+
+    private function resolveVariantDefault(string $featureName, mixed $scope): ?Variant
+    {
+        $default = $this->resolveDefault($featureName, $scope);
+
+        if (!$default) {
+            return null;
+        }
+
+        if ($default instanceof Variant) {
+            return $default;
+        }
+
+        return UnleashVariant::make('default', $default);
     }
 }

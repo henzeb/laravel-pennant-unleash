@@ -3,6 +3,7 @@
 namespace Tests;
 
 use Henzeb\Pennant\Unleash\Providers\PennantUnleashServiceProvider;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Laravel\Pennant\PennantServiceProvider;
 use Orchestra\Testbench\TestCase as BaseTestCase;
@@ -20,13 +21,14 @@ class TestCase extends BaseTestCase
     protected function getEnvironmentSetUp($app): void
     {
         $app['config']->set('pennant.stores.unleash', ['driver' => 'unleash']);
+        $app['config']->set('unleash.cache.ttl', 0);
     }
 
     private function unleashAdmin(): \Illuminate\Http\Client\PendingRequest
     {
         return Http::withHeaders(['Authorization' => env('UNLEASH_ADMIN_TOKEN')])
             ->baseUrl(env('UNLEASH_ADMIN_URL'))
-            ->retry(5, 200, throw: false);
+            ->retry(25, 400, when: fn (\Throwable $e) => $e instanceof ConnectionException, throw: false);
     }
 
     protected function createUnleashFeature(string $name, bool $enabled = false): void
@@ -35,7 +37,12 @@ class TestCase extends BaseTestCase
 
         if ($enabled) {
             $this->enableUnleashFeature($name);
+            return;
         }
+
+        $this->waitForUnleashClientApi(
+            fn(array $features) => collect($features)->contains(fn(array $feature) => $feature['name'] === $name)
+        );
     }
 
     protected function enableUnleashFeature(string $name, string $environment = 'development'): void
@@ -43,6 +50,14 @@ class TestCase extends BaseTestCase
         $this->unleashAdmin()->post("/projects/default/features/{$name}/environments/{$environment}/on", ['enabled' => true]);
         $this->waitForUnleashClientApi(
             fn(array $features) => collect($features)->firstWhere('name', $name)['enabled'] ?? false
+        );
+    }
+
+    protected function disableUnleashFeature(string $name, string $environment = 'development'): void
+    {
+        $this->unleashAdmin()->post("/projects/default/features/{$name}/environments/{$environment}/off", ['enabled' => false]);
+        $this->waitForUnleashClientApi(
+            fn(array $features) => !(collect($features)->firstWhere('name', $name)['enabled'] ?? true)
         );
     }
 
@@ -140,6 +155,24 @@ class TestCase extends BaseTestCase
         $this->waitForStrategyConstraints($name, [['contextName' => 'scope', 'values' => [$scope]]]);
     }
 
+    protected function createArrayScopeFeature(string $name, string $contextName, string $value): void
+    {
+        $this->unleashAdmin()->post('/projects/default/features', ['name' => $name, 'type' => 'release']);
+
+        $this->unleashAdmin()->post(
+            "/projects/default/features/{$name}/environments/development/strategies",
+            [
+                'name' => 'default',
+                'parameters' => (object) [],
+                'constraints' => [['contextName' => $contextName, 'operator' => 'IN', 'values' => [$value]]],
+                'segments' => [],
+            ]
+        );
+
+        $this->enableUnleashFeature($name);
+        $this->waitForStrategyConstraints($name, [['contextName' => $contextName, 'values' => [$value]]]);
+    }
+
     protected function createModelScopeFeature(string $name, string $class, string $id): void
     {
         $this->unleashAdmin()->post('/projects/default/features', ['name' => $name, 'type' => 'release']);
@@ -150,8 +183,8 @@ class TestCase extends BaseTestCase
                 'name' => 'default',
                 'parameters' => (object) [],
                 'constraints' => [
-                    ['contextName' => 'class', 'operator' => 'IN', 'values' => [$class]],
-                    ['contextName' => 'id', 'operator' => 'IN', 'values' => [$id]],
+                    ['contextName' => 'model', 'operator' => 'IN', 'values' => [$class]],
+                    ['contextName' => 'key', 'operator' => 'IN', 'values' => [$id]],
                 ],
                 'segments' => [],
             ]
@@ -159,8 +192,8 @@ class TestCase extends BaseTestCase
 
         $this->enableUnleashFeature($name);
         $this->waitForStrategyConstraints($name, [
-            ['contextName' => 'class', 'values' => [$class]],
-            ['contextName' => 'id', 'values' => [$id]],
+            ['contextName' => 'model', 'values' => [$class]],
+            ['contextName' => 'key', 'values' => [$id]],
         ]);
     }
 
@@ -193,32 +226,32 @@ class TestCase extends BaseTestCase
         $this->unleashAdmin()->delete("/archive/{$name}");
     }
 
-    private function waitForUnleashClientApi(callable $condition, int $timeoutMs = 5000): void
+    private function waitForUnleashClientApi(callable $condition, int $timeoutMs = 15000): void
     {
         $deadline = microtime(true) + $timeoutMs / 1000;
-        $consecutive = 0;
         do {
             $features = $this->fetchUnleashClientFeatures();
-            if ($condition($features)) {
-                if (++$consecutive >= 3) {
-                    usleep(500_000);
-                    if ($condition($this->fetchUnleashClientFeatures())) {
-                        return;
-                    }
-                    $consecutive = 0;
-                }
-            } else {
-                $consecutive = 0;
+            if ($features !== null && $condition($features)) {
+                return;
             }
             usleep(50_000);
         } while (microtime(true) < $deadline);
     }
 
-    private function fetchUnleashClientFeatures(): array
+    /**
+     * Returns null (instead of letting the exception surface) on a dropped connection,
+     * so a transient blip just counts as "not matching yet" to the caller's poll loop
+     * instead of hard-failing the test.
+     */
+    private function fetchUnleashClientFeatures(): ?array
     {
-        return Http::withHeaders(['Authorization' => env('UNLEASH_API_KEY')])
-            ->retry(5, 200, throw: false)
-            ->get(env('UNLEASH_URL') . '/client/features')
-            ->json('features') ?? [];
+        try {
+            return Http::withHeaders(['Authorization' => env('UNLEASH_API_KEY')])
+                ->retry(5, 200, throw: false)
+                ->get(env('UNLEASH_URL') . '/client/features')
+                ->json('features') ?? [];
+        } catch (ConnectionException) {
+            return null;
+        }
     }
 }

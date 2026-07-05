@@ -35,3 +35,10 @@ it('returns the csv payload value', function () {
 
     expect(Feature::value($this->featureName))->toBe('a,b,c');
 });
+
+it('returns false for a feature with variants that is globally disabled', function () {
+    $this->disableUnleashFeature($this->featureName);
+    $this->addUnleashVariant($this->featureName, 'my-variant');
+
+    expect(Feature::value($this->featureName))->toBeFalse();
+});

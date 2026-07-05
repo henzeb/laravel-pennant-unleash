@@ -85,7 +85,7 @@ jobs:
           command: composer update --${{ matrix.stability }} --prefer-dist --no-interaction --no-progress --quiet
 
       - name: Execute Tests
-        run: vendor/bin/pest --coverage-clover=coverage.xml
+        run: vendor/bin/pest --parallel --coverage-clover=coverage.xml
 
       - name: Upload coverage to codeclimate
         uses: paambaati/codeclimate-action@v3.1.1

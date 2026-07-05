@@ -6,6 +6,7 @@ namespace Henzeb\Pennant\Unleash\Configuration;
 
 use DateTimeImmutable;
 use DateTimeInterface;
+use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Support\Traits\Conditionable;
 use Laravel\Pennant\Contracts\FeatureScopeSerializeable;
 use Override;
@@ -18,6 +19,8 @@ final class UnleashContext implements Context, FeatureScopeSerializeable
 {
     use Conditionable;
 
+    private array $customContext = [];
+
     /**
      * @param array<string,string> $customContext
      */
@@ -25,13 +28,14 @@ final class UnleashContext implements Context, FeatureScopeSerializeable
         private ?string $currentUserId = null,
         private ?string $ipAddress = null,
         private ?string $sessionId = null,
-        private array $customContext = [],
+        array|Arrayable $customContext = [],
         ?string $hostname = null,
         private ?string $environment = null,
         DateTimeInterface|string|null $currentTime = null,
     ) {
         $this->setHostname($hostname);
         $this->setCurrentTime($currentTime);
+        $this->withCustomProperties($customContext);
     }
 
     /**
@@ -97,6 +101,29 @@ final class UnleashContext implements Context, FeatureScopeSerializeable
     public function setCustomProperty(string $name, ?string $value): self
     {
         $this->customContext[$name] = $value ?? '';
+
+        return $this;
+    }
+
+    /**
+     * @param array<string,string>|Arrayable<string,string> $customContext
+     */
+    public function setCustomProperties(array|Arrayable $customContext): self
+    {
+        $this->customContext = $customContext instanceof Arrayable ? $customContext->toArray() : $customContext;
+
+        return $this;
+    }
+
+    /**
+     * @param array<string,string>|Arrayable<string,string> $customContext
+     */
+    public function withCustomProperties(array|Arrayable $customContext): self
+    {
+        $this->customContext = array_merge(
+            $this->customContext,
+            $customContext instanceof Arrayable ? $customContext->toArray() : $customContext,
+        );
 
         return $this;
     }

@@ -6,7 +6,9 @@ use Tests\Fixtures\CustomStrategyHandler;
 beforeEach(function () {
     config()->set('pennant.default', 'unleash');
     $this->featureName = 'custom-strategy-feature-' . uniqid();
-    $this->strategyName = 'custom';
+    $this->strategyName = 'custom-' . uniqid();
+
+    app()->bind(CustomStrategyHandler::class, fn() => new CustomStrategyHandler($this->strategyName));
 
     $this->createCustomStrategyFeature($this->featureName, $this->strategyName);
 });

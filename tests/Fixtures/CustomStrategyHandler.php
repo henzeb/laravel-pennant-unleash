@@ -10,14 +10,18 @@ use Unleash\Client\Strategy\StrategyHandler;
 
 class CustomStrategyHandler implements StrategyHandler
 {
+    public function __construct(private readonly string $strategyName = 'custom')
+    {
+    }
+
     public function supports(Strategy $strategy): bool
     {
-        return $strategy->getName() === 'custom';
+        return $strategy->getName() === $this->strategyName;
     }
 
     public function getStrategyName(): string
     {
-        return 'custom';
+        return $this->strategyName;
     }
 
     public function isEnabled(Strategy $strategy, Context $context): bool

@@ -60,6 +60,16 @@ it('resolves a string scope to an unleash context using a custom scope property'
         ->and(Feature::for('other-scope')->active($this->featureName))->toBeFalse();
 });
 
+it('resolves custom properties merged via withCustomProperties, even with an integer key', function () {
+    $this->createArrayScopeFeature($this->featureName, '0', 'allowed-value');
+
+    $allowed = UnleashContext::make()->withCustomProperties([0 => 'allowed-value']);
+    $other = UnleashContext::make()->withCustomProperties([0 => 'other-value']);
+
+    expect(Feature::for($allowed)->active($this->featureName))->toBeTrue()
+        ->and(Feature::for($other)->active($this->featureName))->toBeFalse();
+});
+
 it('resolves an eloquent model to an unleash context using its full class name', function () {
     $model = (new ScopedModel())->forceFill(['id' => 1]);
     $otherModel = (new ScopedModel())->forceFill(['id' => 2]);

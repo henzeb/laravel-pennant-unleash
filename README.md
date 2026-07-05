@@ -21,6 +21,7 @@ Unleash handles all flag evaluation.
   - [Custom strategies](#custom-strategies)
   - [Events](#events)
   - [Metrics reporting](#metrics-reporting)
+  - [Variant handler](#variant-handler)
 - [Context](#context)
   - [Authenticated users](#authenticated-users)
   - [Eloquent models](#eloquent-models)
@@ -29,11 +30,9 @@ Unleash handles all flag evaluation.
   - [FeatureScopeable](#featurescopeable)
   - [Custom context resolver](#custom-context-resolver)
 - [Variants](#variants)
-- [Defining local fallbacks](#defining-local-fallbacks)
+- [Defining local defaults](#defining-local-defaults)
 - [Development mode](#development-mode)
 - [Testing this package](#testing-this-package)
-- [Changelog](#changelog)
-- [Contributing](#contributing)
 - [Security](#security)
 - [Credits](#credits)
 - [License](#license)
@@ -214,7 +213,7 @@ Feature::for($user)->active('my-feature');
 ### Eloquent models
 
 Pass an Eloquent model and the driver sends its class (or morph map alias, if configured) and key as custom
-context properties. In Unleash, target these with **class** and **id** constraints.
+context properties. In Unleash, target these with **model** and **key** constraints.
 
 ```php
 Feature::for($tenant)->active('my-feature');
@@ -224,13 +223,13 @@ For example, `$tenant = App\Models\Tenant::find(42)` sends:
 
 ```php
 [
-    'class' => 'App\Models\Tenant', // or the morph map alias, e.g. 'tenant'
-    'id' => '42',
+    'model' => 'App\Models\Tenant', // or the morph map alias, e.g. 'tenant'
+    'key' => '42',
 ]
 ```
 
-so an Unleash strategy constraint on `class` with value `App\Models\Tenant` (or your morph map alias) combined
-with an `id` constraint on `42` will match this scope.
+so an Unleash strategy constraint on `model` with value `App\Models\Tenant` (or your morph map alias) combined
+with a `key` constraint on `42` will match this scope.
 
 ### Plain strings
 
@@ -270,7 +269,15 @@ $context = new UnleashContext(
 Feature::for($context)->active('my-feature');
 ```
 
-It also has a static `make` factory and supports Laravel's `Conditionable` trait:
+Custom properties can also be set in bulk, from an array or anything implementing
+`Illuminate\Contracts\Support\Arrayable`, using `setCustomProperties()` (replacing them) or `withCustomProperties()`
+(merging into the existing ones):
+
+```php
+$context = UnleashContext::make()->withCustomProperties(['plan' => 'enterprise', 'region' => 'eu-west']);
+```
+
+It also supports Laravel's `Conditionable` trait:
 
 ```php
 $context = UnleashContext::make(currentUserId: '42')
@@ -329,6 +336,7 @@ Returning `null` sends no context to Unleash.
 `Feature::value('my-feature')` resolves the [Unleash variant](https://docs.getunleash.io/reference/feature-toggle-variants)
 for the given feature and scope:
 
+- If the feature has no variants configured, it's evaluated as a plain boolean instead.
 - If the feature (or the matched variant) is disabled, it returns `false`.
 - If the variant has no payload, it returns the variant's name.
 - If the variant has a `string` or `csv` payload, it returns the raw payload value as a string.
@@ -336,26 +344,27 @@ for the given feature and scope:
 
 ```php
 Feature::value('my-feature');
+// false                    — feature/variant disabled
 // 'my-variant'             — variant with no payload
 // 'hello'                  — variant with a string/csv payload
 // ['foo' => 'bar']         — variant with a json payload
 ```
 
-## Defining local fallbacks
+## Defining local defaults
 
 Because this driver reads flags from Unleash, `Feature::define()` doesn't register an initial value the way it does
-for Pennant's built-in drivers. Instead, it registers a **fallback** resolver that only runs when the feature
+for Pennant's built-in drivers. Instead, it registers a **default** resolver that only runs when the feature
 doesn't exist in Unleash yet — for example, before the toggle has been created there, or in an environment where
-it hasn't been rolled out. Once the toggle exists in Unleash, the fallback is ignored and Unleash's evaluation is
+it hasn't been rolled out. Once the toggle exists in Unleash, the default is ignored and Unleash's evaluation is
 used instead.
 
-Without a fallback, a feature that doesn't exist in Unleash simply resolves to `false`. A fallback is only useful
+Without a default, a feature that doesn't exist in Unleash simply resolves to `false`. A default is only useful
 when you need something other than that:
 
 - a **fail-open** default (e.g. `true`) for a toggle that should behave as enabled until it's deliberately created
   and configured in Unleash;
-- a **non-boolean default**, since without a fallback an undefined feature resolves to the boolean `false`, which
-  won't match code expecting a string or decoded JSON payload from `Feature::value()`;
+- a **non-boolean default**, since without one an undefined feature resolves to the boolean `false`, which won't
+  match code expecting a string or decoded JSON payload from `Feature::value()`;
 - an **environment-specific default**, e.g. `true` locally while every environment that matters defaults to `false`
   in production until someone enables the toggle there.
 
@@ -363,9 +372,25 @@ when you need something other than that:
 Feature::define('my-feature', fn (mixed $scope) => true);
 ```
 
+Return a `string` or `array` instead of a `bool` and it's treated as a variant default, so `Feature::value()` gets
+that string or array back instead of `false`. You can also return any object implementing Unleash's own `Variant`
+interface directly — this package ships a fluent `UnleashVariant` for building one, which also uses Laravel's
+`Conditionable` trait so you can use `when()`/`unless()` while building it:
+
+```php
+use Henzeb\Pennant\Unleash\DTO\UnleashVariant;
+
+Feature::define(
+    'my-variant-feature',
+    fn (mixed $scope) => UnleashVariant::make('trial')
+        ->payload(['plan' => 'trial'])
+        ->when($scope?->isAdmin(), fn (UnleashVariant $variant) => $variant->payload(['plan' => 'enterprise'])),
+);
+```
+
 Register this in a service provider's `boot()` method, same as any other `Feature::define()` call.
 
-A feature that only has a local fallback (and doesn't exist in Unleash) won't show up in `Feature::for($scope)->all()`
+A feature that only has a local default (and doesn't exist in Unleash) won't show up in `Feature::for($scope)->all()`
 — it's only used when the feature is checked directly, e.g. via `Feature::active()` or `Feature::value()`.
 
 ## Development mode
@@ -416,14 +441,6 @@ an exception is thrown — this is a misconfiguration, not a state the driver si
 ```bash
 composer test
 ```
-
-## Changelog
-
-Please see [CHANGELOG](CHANGELOG.md) for more information on what has changed recently.
-
-## Contributing
-
-Please see [CONTRIBUTING](CONTRIBUTING.md) for details.
 
 ## Security
 
