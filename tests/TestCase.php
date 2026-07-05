@@ -83,8 +83,8 @@ class TestCase extends BaseTestCase
             [['op' => 'replace', 'path' => '/variants', 'value' => [...$existing, $variant]]]
         );
 
-        $this->waitForUnleashClientApi(fn(array $features) => collect($features)
-            ->firstWhere('name', $featureName)['strategies'][0]['variants'][0]['name'] ?? null === $variantName
+        $this->waitForUnleashClientApi(fn(array $features) => (collect($features)
+            ->firstWhere('name', $featureName)['strategies'][0]['variants'][0]['name'] ?? null) === $variantName
         );
     }
 
@@ -236,6 +236,10 @@ class TestCase extends BaseTestCase
             }
             usleep(50_000);
         } while (microtime(true) < $deadline);
+
+        throw new \RuntimeException(
+            "Unleash client API did not converge to the expected state within {$timeoutMs}ms."
+        );
     }
 
     /**

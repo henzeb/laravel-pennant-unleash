@@ -36,6 +36,7 @@ jobs:
           DATABASE_SSL: "false"
           INIT_BACKEND_API_TOKENS: default:development.test-api-token
           INIT_ADMIN_API_TOKENS: "*:*.test-admin-token"
+          CLIENT_FEATURE_CACHING_ENABLED: "false"
         options: >-
           --health-cmd "wget -qO- http://localhost:4242/health || exit 1"
           --health-interval 5s
